@@ -2,22 +2,21 @@
   "version": 2,
   "builds": [
     {
-      "src": "server/index.js",
+      "src": "dist/server/index.js",
       "use": "@vercel/node"
     },
     {
-      "src": "dist/client/**",
+      "src": "dist/client/**/*",
       "use": "@vercel/static"
     }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "/server/index.js" },
+    { "src": "/api/(.*)", "dest": "dist/server/index.js" },
     { "src": "/(.*)", "dest": "/dist/client/$1" }
   ],
   "env": {
     "NODE_ENV": "production",
     "DATABASE_URL": "@database_url",
-    "OPENAI_API_KEY": "@openai_api_key",
-    "VIPU_KEY": "@vipu_key"
+    "OPENAI_API_KEY": "@openai_api_key"
   }
 }
