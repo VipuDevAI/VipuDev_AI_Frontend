@@ -18,16 +18,57 @@ export default function Chat() {
   });
 
   const sendMessageMutation = useMutation({
-    mutationFn: async (message: { role: string; content: string }) => {
-      const res = await fetch("/api/chat", {
+    // content = user's typed message
+    mutationFn: async (content: string) => {
+      const userText = content.trim();
+      if (!userText) return;
+
+      // 1️⃣ Save USER message to DB
+      const userRes = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(message),
+        body: JSON.stringify({ role: "user", content: userText }),
       });
-      if (!res.ok) throw new Error("Failed to send message");
-      return res.json();
+      if (!userRes.ok) {
+        throw new Error("Failed to save user message");
+      }
+
+      // 2️⃣ Call HYBRID brain (GPT + Perplexity)
+      const hybridRes = await fetch("/api/hybrid-chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // we send only the latest user question;
+          // the server adds memory + research
+          messages: [{ role: "user", content: userText }],
+        }),
+      });
+
+      if (!hybridRes.ok) {
+        const errText = await hybridRes.text();
+        throw new Error(
+          `Hybrid assistant failed: ${hybridRes.status} ${errText || ""}`,
+        );
+      }
+
+      const hybridData: { reply: string; usedResearch?: boolean } =
+        await hybridRes.json();
+      const assistantReply = hybridData.reply || "…";
+
+      // 3️⃣ Save ASSISTANT message to DB
+      const assistantRes = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "assistant", content: assistantReply }),
+      });
+      if (!assistantRes.ok) {
+        throw new Error("Failed to save assistant message");
+      }
+
+      return hybridData;
     },
     onSuccess: () => {
+      // refresh history so UI shows both new messages
       queryClient.invalidateQueries({ queryKey: ["chat-history"] });
       setInput("");
     },
@@ -47,8 +88,8 @@ export default function Chat() {
   });
 
   const handleSend = () => {
-    if (!input.trim()) return;
-    sendMessageMutation.mutate({ role: "user", content: input });
+    if (!input.trim() || sendMessageMutation.isPending) return;
+    sendMessageMutation.mutate(input.trim());
   };
 
   return (
@@ -60,7 +101,9 @@ export default function Chat() {
           </div>
           <div>
             <h2 className="font-bold text-white">Vipu Assistant</h2>
-            <p className="text-xs text-indigo-300">Always online • AI Powered</p>
+            <p className="text-xs text-indigo-300">
+              Always online • Hybrid AI (GPT + Research)
+            </p>
           </div>
         </div>
         <button
@@ -84,7 +127,9 @@ export default function Chat() {
         ) : data?.messages.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-gray-500">
             <Bot className="w-12 h-12 mb-4 opacity-50" />
-            <p className="text-sm">No messages yet. Start a conversation!</p>
+            <p className="text-sm">
+              No messages yet. Start a conversation with VipuDev.AI!
+            </p>
           </div>
         ) : (
           data?.messages.map((message) => {
@@ -92,7 +137,9 @@ export default function Chat() {
             return (
               <div
                 key={message.id}
-                className={`flex gap-4 max-w-3xl ${isBot ? "" : "ml-auto flex-row-reverse"}`}
+                className={`flex gap-4 max-w-3xl ${
+                  isBot ? "" : "ml-auto flex-row-reverse"
+                }`}
                 data-testid={`message-${message.id}`}
               >
                 <div
@@ -102,7 +149,11 @@ export default function Chat() {
                       : "bg-gray-700 text-gray-300 border-gray-600"
                   }`}
                 >
-                  {isBot ? <Bot className="w-5 h-5" /> : <User className="w-5 h-5" />}
+                  {isBot ? (
+                    <Bot className="w-5 h-5" />
+                  ) : (
+                    <User className="w-5 h-5" />
+                  )}
                 </div>
                 <div className="space-y-2">
                   <div
@@ -114,8 +165,14 @@ export default function Chat() {
                   >
                     {message.content}
                   </div>
-                  <div className={`text-xs text-gray-600 ${isBot ? "ml-1" : "mr-1 text-right"}`}>
-                    {formatDistanceToNow(new Date(message.createdAt), { addSuffix: true })}
+                  <div
+                    className={`text-xs text-gray-600 ${
+                      isBot ? "ml-1" : "mr-1 text-right"
+                    }`}
+                  >
+                    {formatDistanceToNow(new Date(message.createdAt), {
+                      addSuffix: true,
+                    })}
                   </div>
                 </div>
               </div>
@@ -135,7 +192,7 @@ export default function Chat() {
                 handleSend();
               }
             }}
-            placeholder="Ask VipuDevAI anything..."
+            placeholder="Ask VipuDevAI anything about your code, project, or the world..."
             className="w-full bg-black/20 border border-white/10 rounded-xl p-4 pr-12 text-sm text-white placeholder:text-gray-600 focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/50 resize-none min-h-[60px]"
             data-testid="input-chat-message"
           />
@@ -153,7 +210,8 @@ export default function Chat() {
           </button>
         </div>
         <div className="text-center text-[10px] text-gray-600 mt-2">
-          AI can make mistakes. Review generated code.
+          Answers use both deep reasoning and fresh research. Still review
+          sensitive code once.
         </div>
       </div>
     </div>
